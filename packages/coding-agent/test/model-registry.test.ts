@@ -2544,6 +2544,28 @@ describe("ModelRegistry", () => {
 		expect(registry.find("ollama-cloud", "deepseek-v4-pro")?.maxTokens).toBe(384_000);
 	});
 
+	test("loads cached openai-codex discovery models on startup", () => {
+		// The Codex catalog is discovered per account, so a model the account gained after this build
+		// shipped exists only in the cache until a refresh runs. `jwc --model` resolves before any refresh.
+		const cachedModel: Model<"openai-codex-responses"> = {
+			id: "gpt-6.1-sol",
+			name: "GPT-6.1 Sol",
+			api: "openai-codex-responses",
+			provider: "openai-codex",
+			baseUrl: "https://chatgpt.com/backend-api",
+			reasoning: true,
+			input: ["text", "image"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 872_000,
+			maxTokens: 128_000,
+		};
+		writeModelCache("openai-codex", Date.now(), [cachedModel], true, "", cacheDbPath);
+
+		const registry = new ModelRegistry(authStorage, modelsJsonPath);
+
+		expect(registry.find("openai-codex", "gpt-6.1-sol")?.contextWindow).toBe(872_000);
+	});
+
 	test("preserves request shaping and wire aliases when replacing a built-in model", () => {
 		writeRawModelsJson({
 			openai: {

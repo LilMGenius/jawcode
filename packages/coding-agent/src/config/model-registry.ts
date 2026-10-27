@@ -67,6 +67,9 @@ export function isAuthenticated(apiKey: string | undefined | null): apiKey is st
 
 const MAX_SESSION_CANONICAL_VARIANTS = 64;
 const CODEX_DISCOVERY_TIMEOUT_MS = 10_000;
+// Built-in providers discovered through #collectBuiltInModelManagerOptions' special descriptors rather than
+// PROVIDER_DESCRIPTORS. Their discovery writes the same model cache, so startup must read it back too.
+const SPECIAL_DISCOVERY_PROVIDER_IDS = ["google-antigravity", "google-gemini-cli", "openai-codex"] as const;
 
 export interface ModelRegistryOptions {
 	fetch?: FetchImpl;
@@ -1320,25 +1323,29 @@ export class ModelRegistry {
 	#loadCachedStandardProviderModels(): Model<Api>[] {
 		const configuredDiscoveryProviders = new Set(this.#discoverableProviders.map(provider => provider.provider));
 		const cachedModels: Model<Api>[] = [];
-		for (const descriptor of PROVIDER_DESCRIPTORS) {
-			if (configuredDiscoveryProviders.has(descriptor.providerId)) {
+		const providerIds = [
+			...PROVIDER_DESCRIPTORS.map(descriptor => descriptor.providerId),
+			...SPECIAL_DISCOVERY_PROVIDER_IDS,
+		];
+		for (const providerId of providerIds) {
+			if (configuredDiscoveryProviders.has(providerId)) {
 				continue;
 			}
-			const cache = readModelCache<Api>(descriptor.providerId, 24 * 60 * 60 * 1000, Date.now, this.#cacheDbPath);
+			const cache = readModelCache<Api>(providerId, 24 * 60 * 60 * 1000, Date.now, this.#cacheDbPath);
 			if (!cache) {
 				continue;
 			}
 			const models = cache.models.map(model =>
-				model.provider === descriptor.providerId ? model : { ...model, provider: descriptor.providerId },
+				model.provider === providerId ? model : { ...model, provider: providerId },
 			);
-			const providerOverride = this.#resolveProviderOverride(descriptor.providerId);
+			const providerOverride = this.#resolveProviderOverride(providerId);
 			const withTransport = providerOverride
 				? models.map(model => this.#applyProviderTransportOverride(model, providerOverride))
 				: models;
 			const withCompat = providerOverride?.compat
 				? withTransport.map(model => ({ ...model, compat: mergeCompat(model.compat, providerOverride.compat) }))
 				: withTransport;
-			cachedModels.push(...this.#applyProviderModelOverrides(descriptor.providerId, withCompat));
+			cachedModels.push(...this.#applyProviderModelOverrides(providerId, withCompat));
 		}
 		return cachedModels;
 	}
