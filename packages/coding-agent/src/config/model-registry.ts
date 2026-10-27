@@ -67,9 +67,13 @@ export function isAuthenticated(apiKey: string | undefined | null): apiKey is st
 
 const MAX_SESSION_CANONICAL_VARIANTS = 64;
 const CODEX_DISCOVERY_TIMEOUT_MS = 10_000;
-// Built-in providers discovered through #collectBuiltInModelManagerOptions' special descriptors rather than
-// PROVIDER_DESCRIPTORS. Their discovery writes the same model cache, so startup must read it back too.
-const SPECIAL_DISCOVERY_PROVIDER_IDS = ["google-antigravity", "google-gemini-cli", "openai-codex"] as const;
+
+/** A built-in provider discovered with OAuth credentials instead of through PROVIDER_DESCRIPTORS. */
+type SpecialProviderDescriptor = {
+	providerId: string;
+	resolveKey: (value: string | undefined) => string | undefined;
+	createOptions: (key: string) => ModelManagerOptions<Api>;
+};
 
 export interface ModelRegistryOptions {
 	fetch?: FetchImpl;
@@ -1323,9 +1327,10 @@ export class ModelRegistry {
 	#loadCachedStandardProviderModels(): Model<Api>[] {
 		const configuredDiscoveryProviders = new Set(this.#discoverableProviders.map(provider => provider.provider));
 		const cachedModels: Model<Api>[] = [];
+		// Special providers' discovery writes the same model cache, so startup reads it back for them too.
 		const providerIds = [
 			...PROVIDER_DESCRIPTORS.map(descriptor => descriptor.providerId),
-			...SPECIAL_DISCOVERY_PROVIDER_IDS,
+			...this.#specialProviderDescriptors().map(descriptor => descriptor.providerId),
 		];
 		for (const providerId of providerIds) {
 			if (configuredDiscoveryProviders.has(providerId)) {
@@ -1810,12 +1815,8 @@ export class ModelRegistry {
 		return discoveries.flat();
 	}
 
-	async #collectBuiltInModelManagerOptions(strategy: ModelRefreshStrategy): Promise<ModelManagerOptions<Api>[]> {
-		const specialProviderDescriptors: Array<{
-			providerId: string;
-			resolveKey: (value: string | undefined) => string | undefined;
-			createOptions: (key: string) => ModelManagerOptions<Api>;
-		}> = [
+	#specialProviderDescriptors(): SpecialProviderDescriptor[] {
+		return [
 			{
 				providerId: "google-antigravity",
 				resolveKey: extractGoogleOAuthToken,
@@ -1847,6 +1848,10 @@ export class ModelRegistry {
 				},
 			},
 		];
+	}
+
+	async #collectBuiltInModelManagerOptions(strategy: ModelRefreshStrategy): Promise<ModelManagerOptions<Api>[]> {
+		const specialProviderDescriptors = this.#specialProviderDescriptors();
 		const disabledProviders = getDisabledProviderIdsFromSettings();
 		const standardProviderDescriptors = PROVIDER_DESCRIPTORS.filter(
 			descriptor => !disabledProviders.has(descriptor.providerId),
